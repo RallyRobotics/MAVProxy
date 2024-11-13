@@ -1,3 +1,4 @@
+from queue import Queue
 from paho.mqtt import MQTTException
 from MAVProxy.modules.lib import mp_settings
 from MAVProxy.modules.lib import mp_module
@@ -20,6 +21,7 @@ class MqttModule(mp_module.MPModule):
         self.add_command('mqtt', self.mqtt_command, "mqtt module", ['connect', 'set (MQTTSETTING)'])
         self.add_completion_function('(MQTTSETTING)', self.mqtt_settings.completion)
         self.client.on_message = self.on_mqtt_message
+        self.command_queue = Queue()
 
     def mavlink_packet(self, m):
         """Handle an incoming MAVLink packet"""
@@ -74,7 +76,8 @@ class MqttModule(mp_module.MPModule):
             message_data = json.loads(msg.payload.decode('utf-8'))
             mavlink_message = self.convert_to_mavlink(message_data)
             if mavlink_message:
-                self.master.mav.send(mavlink_message)
+                # Add the MAVLink message to the queue for processing
+                self.command_queue.put(mavlink_message)
         except Exception as e:
             print(f'mqtt: Error processing incoming message: {e}')
 
@@ -99,6 +102,15 @@ class MqttModule(mp_module.MPModule):
             print(f"mqtt: Failed to create MAVLink COMMAND_LONG message: {e}")
             return None
 
+    def idle_task(self):
+        """Process commands from the queue in the main MAVProxy thread."""
+        if not self.command_queue.empty():
+            mavlink_message = self.command_queue.get()
+            try:
+                self.master.mav.send(mavlink_message)
+                print("MAVLink command sent successfully.")
+            except Exception as e:
+                print(f"Error sending MAVLink command: {e}")
 
 def init(mpstate):
     """Initialize module"""

@@ -8,12 +8,11 @@ import numbers
 
 class MqttModule(mp_module.MPModule):
     def __init__(self, mpstate):
-        super(MqttModule, self).__init__(mpstate, "mqtt", "mqtt publisher and subscriber")
-        self.client = mqtt.Client(client_id="mavproxy")
+        super(MqttModule, self).__init__(mpstate, "mqtt", "MQTT publisher and subscriber using Unix sockets")
+        self.client = mqtt.Client(transport="unix")  # Use Unix socket transport
         self.device_prefix = ''
         self.mqtt_settings = mp_settings.MPSettings(
-            [('ip', str, '127.0.0.1'),
-             ('port', int, '1883'),
+            [('socket_path', str, '/tmp/mosquitto.sock'),  # Default path to Unix socket
              ('name', str, 'mavproxy'),
              ('prefix', str, 'ardupilot/gcs'),
              ('subscribe_topic', str, 'ardupilot/cmd')  # Default topic for subscribing
@@ -33,8 +32,9 @@ class MqttModule(mp_module.MPModule):
     def connect(self):
         """Connect to MQTT broker and subscribe to topics"""
         try:
-            print(f'Connecting to {self.mqtt_settings.ip}:{self.mqtt_settings.port}')
-            self.client.connect(self.mqtt_settings.ip, int(self.mqtt_settings.port), 30)
+            socket_path = self.mqtt_settings.socket_path
+            print(f'Connecting to Unix socket: {socket_path}')
+            self.client.connect(socket_path)
             self.client.subscribe(self.mqtt_settings.subscribe_topic)
             print(f'Subscribed to topic: {self.mqtt_settings.subscribe_topic}')
             self.client.loop_start()  # Start a separate thread to handle MQTT messages

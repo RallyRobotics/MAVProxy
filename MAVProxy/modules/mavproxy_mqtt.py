@@ -15,8 +15,7 @@ class MqttModule(mp_module.MPModule):
         self.mqtt_settings = mp_settings.MPSettings(
             [('socket_path', str, '/tmp/mosquitto.sock'),  # Default path to Unix socket
              ('name', str, 'mavproxy'),
-             ('prefix', str, 'ardupilot/gcs'),
-             ('subscribe_topic', str, 'ardupilot/cmd')  # Default topic for subscribing
+             ('prefix', str, 'ardupilot/gcs')
              ])
         self.add_command('mqtt', self.mqtt_command, "mqtt module", ['connect', 'set (MQTTSETTING)'])
         self.add_completion_function('(MQTTSETTING)', self.mqtt_settings.completion)
@@ -35,15 +34,14 @@ class MqttModule(mp_module.MPModule):
         """Connect to MQTT broker and subscribe to topics"""
         try:
             socket_path = self.mqtt_settings.socket_path
-            print(f'Connecting to Unix socket: {socket_path}')
+            print(f'mqtt: Connecting to Unix socket: {socket_path}')
             self.client.connect(socket_path)
-            self.client.subscribe(self.mqtt_settings.subscribe_topic)
-            print(f'Subscribed to topic: {self.mqtt_settings.subscribe_topic}')
+            self.client.subscribe([('mavproxy/cmd', 0), ('mavlink/cmd', 0)])
             self.client.loop_start()  # Start a separate thread to handle MQTT messages
         except MQTTException as e:
             print(f'mqtt: Could not establish connection: {e}')
             return
-        print('Connected and subscribing...')
+        print('mqtt: Connected and subscribing...')
 
     def mqtt_command(self, args):
         """Control behavior of the module"""
@@ -72,12 +70,20 @@ class MqttModule(mp_module.MPModule):
     def on_mqtt_message(self, client, userdata, msg):
         """Handle incoming MQTT messages"""
         try:
-            print(f'Received MQTT message on topic {msg.topic}')
-            message_data = json.loads(msg.payload.decode('utf-8'))
-            mavlink_message = self.convert_to_mavlink(message_data)
-            if mavlink_message:
-                # Add the MAVLink message to the queue for processing
-                self.command_queue.put(mavlink_message)
+            print(f'mqtt: Received MQTT message on topic {msg.topic}')
+            if msg.topic == 'mavproxy/cmd':
+                # Handle commands from the 'mavproxy/cmd' topic
+                commands = msg.payload.decode('utf-8').strip().split(';')
+                for command in commands:
+                    if command:
+                        self.mpstate.functions.process_stdin(command)
+            elif msg.topic == 'mavlink/cmd':
+                # Handle other topics as MAVLink messages
+                message_data = json.loads(msg.payload.decode('utf-8'))
+                mavlink_message = self.convert_to_mavlink(message_data)
+                if mavlink_message:
+                    # Add the MAVLink message to the queue for processing
+                    self.command_queue.put(mavlink_message)
         except Exception as e:
             print(f'mqtt: Error processing incoming message: {e}')
 
@@ -86,7 +92,7 @@ class MqttModule(mp_module.MPModule):
         try:
             # Assume all messages fit the COMMAND_LONG format
             return self.master.mav.command_long_encode(
-                data.get('target_system', 1),        # Default to system ID 1
+                data.get('target_system', 1),       # Default to system ID 1
                 data.get('target_component', 1),    # Default to component ID 1
                 data.get('command', 0),             # MAVLink command (required)
                 data.get('confirmation', 0),        # Confirmation (default to 0)
@@ -108,9 +114,9 @@ class MqttModule(mp_module.MPModule):
             mavlink_message = self.command_queue.get()
             try:
                 self.master.mav.send(mavlink_message)
-                print("MAVLink command sent successfully.")
+                print("mqtt: MAVLink command sent successfully.")
             except Exception as e:
-                print(f"Error sending MAVLink command: {e}")
+                print(f"mqtt: Error sending MAVLink command: {e}")
 
 def init(mpstate):
     """Initialize module"""
